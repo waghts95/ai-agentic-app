@@ -3,7 +3,7 @@ name: Build and Deploy to Cloud Run
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 env:
@@ -16,9 +16,11 @@ jobs:
   build-and-push-images:
     name: Build and Push Docker Images
     runs-on: ubuntu-latest
+
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
+
     strategy:
       matrix:
         include:
@@ -31,6 +33,7 @@ jobs:
           - service: mcp-server
             dockerfile: mcp_server/Dockerfile
             port: 8002
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,8 +42,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: 'projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-          service_account: 'cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com'
+          workload_identity_provider: projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -63,7 +66,6 @@ jobs:
           push: true
           tags: |
             ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:${{ github.sha }}
-            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -71,9 +73,11 @@ jobs:
     name: Deploy to Cloud Run
     needs: build-and-push-images
     runs-on: ubuntu-latest
+
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
+
     strategy:
       matrix:
         include:
@@ -89,6 +93,7 @@ jobs:
             port: 8002
             memory: 512Mi
             cpu: 1
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,8 +102,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: 'projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-          service_account: 'cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com'
+          workload_identity_provider: projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
 
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
@@ -117,4 +122,6 @@ jobs:
       - name: Show Service URL
         run: |
           echo "Service ${{ matrix.service }} deployed successfully!"
-          echo "URL: $(gcloud run services describe ${{ matrix.service }} --region=${{ env.REGION }} --format='value(status.url)')"
+          gcloud run services describe ${{ matrix.service }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)'

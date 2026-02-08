@@ -1,0 +1,120 @@
+name: Build and Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: tusharwagh
+  GAR_LOCATION: asia-south1
+  REPOSITORY: practise-repo
+  REGION: asia-south1
+
+jobs:
+  build-and-push-images:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    strategy:
+      matrix:
+        include:
+          - service: server
+            dockerfile: server/Dockerfile
+            port: 8001
+          - service: client
+            dockerfile: client/Dockerfile
+            port: 8080
+          - service: mcp-server
+            dockerfile: mcp_server/Dockerfile
+            port: 8002
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GAR_LOCATION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-services:
+    name: Deploy to Cloud Run
+    needs: build-and-push-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    strategy:
+      matrix:
+        include:
+          - service: server
+            port: 8001
+            memory: 512Mi
+            cpu: 1
+          - service: client
+            port: 8080
+            memory: 1Gi
+            cpu: 1
+          - service: mcp-server
+            port: 8002
+            memory: 512Mi
+            cpu: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/1079603514873/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'cicd-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com'
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ matrix.service }}
+          region: ${{ env.REGION }}
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:${{ github.sha }}
+          flags: |
+            --port=${{ matrix.port }}
+            --memory=${{ matrix.memory }}
+            --cpu=${{ matrix.cpu }}
+            --allow-unauthenticated
+            --max-instances=10
+            --min-instances=0
+
+      - name: Show Service URL
+        run: |
+          echo "Service ${{ matrix.service }} deployed successfully!"
+          echo "URL: $(gcloud run services describe ${{ matrix.service }} --region=${{ env.REGION }} --format='value(status.url)')"

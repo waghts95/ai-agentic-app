@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sse-starlette
+langchain
+langchain-ollama
+pydantic
+websockets
+fastmcp
+langchain-classic
